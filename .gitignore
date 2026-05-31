@@ -5,6 +5,22 @@ build/
 dist/
 wheels/
 *.egg-info
+*.egg-info/
+.DS_Store
+
 
 # Virtual environments
 .venv
+
+# Secrets
+.env
+
+# Local run artifacts
+logs/*.log
+data/**
+!data/
+!data/.gitkeep
+test_data/**
+!test_data/
+!test_data/.gitkeep
+tests/
