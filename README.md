@@ -33,13 +33,19 @@ Tushare API -> raw parquet 留痕 -> Polars 字段映射/类型转换 -> DuckDB 
 | `future_list` | `raw/tushare/future_basic.parquet` | `reference_instrument`, `reference_future` | 期货合约基础信息 |
 | `market_bars_future_daily` | `raw/tushare/future_daily.parquet` | `market_bars_derivative_daily` | 期货日线行情 |
 
+已开始接入 yfinance provider：
+
+- `YFinanceSearchClient`：封装 `Search` / `Lookup`，用于查询和验证 ticker。
+- `YFinanceMarketDataClient`：封装 `download()`，将 Yahoo Finance 历史行情整理成扁平 raw DataFrame。
+- `test_run/run_yfinance_history.py`：从统一 YAML 中读取 `source: yfinance` 的配置，验证历史行情下载结构。
+
 ## 目录结构
 
 ```text
 quant_database/
 ├── README.md
 ├── pyproject.toml
-├── main.py                         # 默认读取 test_run/tushare_one_day.yaml
+├── main.py                         # 默认读取 test_run/one_day.yaml
 ├── .env.example                    # Tushare token 示例
 │
 ├── src/
@@ -70,8 +76,9 @@ quant_database/
 │       └── tools.py                # 日期工具、parquet 增量更新、DuckDB 状态查询
 │
 ├── test_run/
-│   ├── tushare_one_day.yaml        # 测试运行参数
-│   └── run_tushare_one_day.py      # 测试运行入口
+│   ├── one_day.yaml                # 测试运行参数
+│   ├── run_one_day.py              # 测试运行入口
+│   └── run_yfinance_history.py     # yfinance 行情接口验证脚本
 │
 ├── test_data/                      # 测试数据库和 raw parquet，运行后生成
 ├── data/                           # 生产数据库和 raw parquet，运行后生成
@@ -103,7 +110,7 @@ TUSHARE_TOKEN=your_tushare_token_here
 测试配置文件位于：
 
 ```text
-test_run/tushare_one_day.yaml
+test_run/one_day.yaml
 ```
 
 示例：
@@ -114,7 +121,8 @@ run_date: 2026-05-27
 root_dir: test_data
 
 datasets:
-  - name: future_list
+  - source: tushare
+    name: future_list
     enabled: true
     params:
       exchanges:
@@ -125,11 +133,25 @@ datasets:
         - INE
         - GFEX
 
-  - name: market_bars_future_daily
+  - source: tushare
+    name: market_bars_future_daily
     enabled: false
     params:
       start: 2026-05-27
       end: 2026-05-27
+
+  - source: yfinance
+    name: history
+    enabled: false
+    params:
+      tickers:
+        - AAPL
+        - MSFT
+        - SPY
+      start: 2026-06-01
+      end: 2026-06-09
+      interval: 1d
+      auto_adjust: false
 ```
 
 ### 4. 运行
@@ -143,13 +165,19 @@ uv run python main.py
 或指定配置文件：
 
 ```bash
-uv run python main.py test_run/tushare_one_day.yaml
+uv run python main.py test_run/one_day.yaml
 ```
 
 也可以直接运行测试脚本：
 
 ```bash
-uv run python test_run/run_tushare_one_day.py
+uv run python test_run/run_one_day.py
+```
+
+验证 yfinance 历史行情接口：
+
+```bash
+uv run python test_run/run_yfinance_history.py
 ```
 
 运行结果默认写入：
@@ -240,7 +268,7 @@ test_data/
 近期计划：
 
 - 增加生产配置目录 `prod_run/` 的固定运行模板。
-- 逐步接入 yfinance 等海外数据源。
+- 在 yfinance provider 基础上补充 loader 和 DuckDB 入库链路。
 
 长期方向：
 

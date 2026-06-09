@@ -12,6 +12,7 @@ from quant_database.providers.tushare_client import find_project_root
 @dataclass(frozen=True)
 class DatasetRunConfig:
     name: str
+    source: str = "tushare"
     enabled: bool = True
     params: dict[str, Any] = field(default_factory=dict)
 
@@ -19,6 +20,7 @@ class DatasetRunConfig:
     def from_dict(cls, data: dict[str, Any]) -> DatasetRunConfig:
         return cls(
             name=data["name"],
+            source=str(data.get("source", "tushare")),
             enabled=bool(data.get("enabled", True)),
             params=dict(data.get("params", {})),
         )
@@ -73,3 +75,6 @@ class TushareRunConfig:
             return None
         path = Path(self.db_path).expanduser()
         return path if path.is_absolute() else root_dir / path
+
+    def datasets_for_source(self, source: str) -> list[DatasetRunConfig]:
+        return [dataset for dataset in self.datasets if dataset.source == source]

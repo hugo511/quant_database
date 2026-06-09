@@ -11,7 +11,7 @@ if str(SRC) not in sys.path:
 from quant_database.cli import main
 
 
-DEFAULT_CONFIG = ROOT / "test_run" / "tushare_one_day.yaml"
+DEFAULT_CONFIG = ROOT / "test_run" / "one_day.yaml"
 
 
 if __name__ == "__main__":

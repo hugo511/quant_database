@@ -36,6 +36,9 @@ def run_tushare_config(config_path: str | Path) -> list[LoadResult]:
     for dataset in config.datasets:
         if not dataset.enabled:
             continue
+        if dataset.source != "tushare":
+            logger.info(f"Skip dataset {dataset.name}: source={dataset.source} is not handled by TushareLoader.")
+            continue
         result = loader.update(dataset.name, **dataset.params)
         results.append(result)
         _log_result(result)

@@ -1,0 +1,121 @@
+run_env: test
+run_date: 2026-05-27
+root_dir: test_data
+datasets:
+
+  - name: stock_list
+    enabled: true
+    source: tushare
+
+  - name: stock_st
+    enabled: true
+    params:
+      start: 2026-05-27
+      end: 2026-05-27
+    source: tushare
+
+  - name: stock_daily
+    enabled: true
+    params:
+      start: 2026-05-27
+      end: 2026-05-27
+    source: tushare
+
+  - name: etf_list
+    enabled: true
+    source: tushare
+
+  - name: market_bars_etf_daily
+    enabled: true
+    params:
+      start: 2026-05-27
+      end: 2026-05-27
+    source: tushare
+
+  - name: index_list
+    enabled: true
+    params:
+      markets:
+        - SSE
+        - SZSE
+        - CSI
+    source: tushare
+
+  - name: market_bars_index_daily
+    enabled: true
+    params:
+      start: 2026-05-27
+      end: 2026-05-27
+      index_codes:
+        - 000001.SH
+        - 000016.SH
+        - 000010.SH
+        - 000300.SH
+        - 000903.SH
+        - 000510.SH
+        - 000905.SH
+        - 000906.SH
+        - 000852.SH
+        - 399001.SZ
+        - 399330.SZ
+        - 399006.SZ
+        - 399673.SZ
+        - 399303.SZ
+        - 000688.SH
+        - 000698.SH
+        - 000699.SH
+        - 399975.SZ
+        - 399986.SZ
+        - 399989.SZ
+        - 399967.SZ
+        - 399808.SZ
+        - 399976.SZ
+        - 000061.SH
+        - 000140.CSI
+        - 930916.CSI
+        - 931018.CSI
+        - 931552.CSI
+        - 932200.CSI
+        - 950175.CSI
+        - 950243.CSI
+        - 950245.CSI
+        - H01077.CSI
+        - H11077.CSI
+    source: tushare
+
+  - name: future_list
+    enabled: false
+    params:
+      exchanges:
+        - CFFEX
+        - DCE
+        - CZCE
+        - SHFE
+        - INE
+        - GFEX
+    source: tushare
+
+  - name: market_bars_future_daily
+    enabled: true
+    params:
+      start: 2026-05-27
+      end: 2026-05-27
+    source: tushare
+
+  - source: yfinance
+    name: history
+    enabled: true
+    params:
+      tickers:
+        - AAPL
+        - MSFT
+        - SPY
+        - QQQ
+        - ^GSPC
+      start: '2026-06-01'
+      end: '2026-06-09'
+      interval: 1d
+      auto_adjust: false
+      actions: true
+      repair: false
+      threads: true
