@@ -5,6 +5,7 @@ from pathlib import Path
 
 from quant_database.config import TushareRunConfig
 from quant_database.loaders.tushare.loader import LoadResult, TushareLoader
+from quant_database.loaders.yfinance.loader import YFinanceLoader
 from quant_database.providers.tushare_client import find_project_root
 from utils.logger import logger
 
@@ -30,16 +31,19 @@ def run_tushare_config(config_path: str | Path) -> list[LoadResult]:
     config = TushareRunConfig.from_yaml(config_path)
     root_dir = config.resolved_root_dir(config_path)
     db_path = config.resolved_db_path(root_dir)
-    loader = TushareLoader(root_dir=root_dir, db_path=db_path)
+    loaders = {
+        "tushare": TushareLoader(root_dir=root_dir, db_path=db_path),
+        "yfinance": YFinanceLoader(root_dir=root_dir, db_path=db_path),
+    }
 
     results: list[LoadResult] = []
     for dataset in config.datasets:
         if not dataset.enabled:
             continue
-        if dataset.source != "tushare":
-            logger.info(f"Skip dataset {dataset.name}: source={dataset.source} is not handled by TushareLoader.")
+        if dataset.source not in loaders:
+            logger.info(f"Skip dataset {dataset.name}: source={dataset.source} is not supported.")
             continue
-        result = loader.update(dataset.name, **dataset.params)
+        result = loaders[dataset.source].update(dataset.name, **dataset.params)
         results.append(result)
         _log_result(result)
 

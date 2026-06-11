@@ -103,7 +103,7 @@ datasets:
     source: tushare
 
   - source: yfinance
-    name: history
+    name: yf_instrument
     enabled: true
     params:
       tickers:
@@ -112,6 +112,11 @@ datasets:
         - SPY
         - QQQ
         - ^GSPC
+
+  - source: yfinance
+    name: yf_market_bars_daily
+    enabled: true
+    params:
       start: '2026-06-01'
       end: '2026-06-09'
       interval: 1d

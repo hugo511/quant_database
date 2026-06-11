@@ -281,3 +281,27 @@ class YFinanceClient:
 
     def download_history(self, *args: Any, **kwargs: Any) -> pd.DataFrame:
         return self.market_data_client.download_history(*args, **kwargs)
+
+
+if __name__ == "__main__":
+    client = YFinanceClient()
+
+    print("Search demo:")
+    print(client.search("Apple", max_results=3).head().to_string(index=False))
+
+    print("\nLookup demo:")
+    print(client.lookup("Apple", asset_type="stock", count=3).head().to_string(index=False))
+
+    print("\nValidate tickers demo:")
+    print(client.validate_tickers(["AAPL", "MSFT", "SPY", "^GSPC"]).to_string(index=False))
+
+    print("\nHistory demo:")
+    history = client.download_history(
+        tickers=["AAPL", "MSFT"],
+        start=date(2026, 6, 1),
+        end=date(2026, 6, 9),
+        interval="1d",
+        auto_adjust=False,
+        actions=False,
+    )
+    print(history.head().to_string(index=False))

@@ -33,11 +33,12 @@ Tushare API -> raw parquet 留痕 -> Polars 字段映射/类型转换 -> DuckDB 
 | `future_list` | `raw/tushare/future_basic.parquet` | `reference_instrument`, `reference_future` | 期货合约基础信息 |
 | `market_bars_future_daily` | `raw/tushare/future_daily.parquet` | `market_bars_derivative_daily` | 期货日线行情 |
 
-已开始接入 yfinance provider：
+已开始接入 yfinance 数据源：
 
 - `YFinanceSearchClient`：封装 `Search` / `Lookup`，用于查询和验证 ticker。
 - `YFinanceMarketDataClient`：封装 `download()`，将 Yahoo Finance 历史行情整理成扁平 raw DataFrame。
-- `test_run/run_yfinance_history.py`：从统一 YAML 中读取 `source: yfinance` 的配置，验证历史行情下载结构。
+- `YFinanceTickerValidator`：将 ticker 验证结果标准化为内部字段。
+- `YFinanceLoader`：从统一 YAML 中读取 `source: yfinance` 的配置，分别执行 `yf_instrument` 和 `yf_market_bars_daily` 更新。
 
 ## 目录结构
 
@@ -65,11 +66,14 @@ quant_database/
 │   │   │   └── upsert.py           # 按主键删除后插入
 │   │   │
 │   │   ├── providers/
-│   │   │   └── tushare_client.py   # Tushare API 封装
+│   │   │   ├── tushare_client.py   # Tushare API 封装
+│   │   │   └── yfinance_client.py  # yfinance API 封装
 │   │   │
 │   │   └── loaders/
-│   │       └── tushare/
-│   │           └── loader.py       # Tushare 数据集下载、转换、入库
+│   │       ├── tushare/
+│   │       │   └── loader.py       # Tushare 数据集下载、转换、入库
+│   │       └── yfinance/
+│   │           └── loader.py       # yfinance 数据集下载、转换、入库
 │   │
 │   └── utils/
 │       ├── logger.py
@@ -77,8 +81,7 @@ quant_database/
 │
 ├── test_run/
 │   ├── one_day.yaml                # 测试运行参数
-│   ├── run_one_day.py              # 测试运行入口
-│   └── run_yfinance_history.py     # yfinance 行情接口验证脚本
+│   └── run_one_day.py              # 测试运行入口
 │
 ├── test_data/                      # 测试数据库和 raw parquet，运行后生成
 ├── data/                           # 生产数据库和 raw parquet，运行后生成
@@ -113,46 +116,6 @@ TUSHARE_TOKEN=your_tushare_token_here
 test_run/one_day.yaml
 ```
 
-示例：
-
-```yaml
-run_env: test
-run_date: 2026-05-27
-root_dir: test_data
-
-datasets:
-  - source: tushare
-    name: future_list
-    enabled: true
-    params:
-      exchanges:
-        - CFFEX
-        - DCE
-        - CZCE
-        - SHFE
-        - INE
-        - GFEX
-
-  - source: tushare
-    name: market_bars_future_daily
-    enabled: false
-    params:
-      start: 2026-05-27
-      end: 2026-05-27
-
-  - source: yfinance
-    name: history
-    enabled: false
-    params:
-      tickers:
-        - AAPL
-        - MSFT
-        - SPY
-      start: 2026-06-01
-      end: 2026-06-09
-      interval: 1d
-      auto_adjust: false
-```
 
 ### 4. 运行
 
@@ -174,7 +137,7 @@ uv run python main.py test_run/one_day.yaml
 uv run python test_run/run_one_day.py
 ```
 
-验证 yfinance 历史行情接口：
+运行 yfinance 历史行情更新：
 
 ```bash
 uv run python test_run/run_yfinance_history.py
@@ -186,13 +149,16 @@ uv run python test_run/run_yfinance_history.py
 test_data/
 ├── quant.duckdb
 └── raw/
-    └── tushare/
+    ├── tushare/
+    │   ├── reference_instrument.parquet
+    │   ├── stock_daily.parquet
+    │   ├── fund_daily.parquet
+    │   ├── index_daily.parquet
+    │   ├── future_basic.parquet
+    │   └── future_daily.parquet
+    └── yfinance/
         ├── reference_instrument.parquet
-        ├── stock_daily.parquet
-        ├── fund_daily.parquet
-        ├── index_daily.parquet
-        ├── future_basic.parquet
-        └── future_daily.parquet
+        └── daily.parquet
 ```
 
 ## 数据模型
@@ -268,7 +234,7 @@ test_data/
 近期计划：
 
 - 增加生产配置目录 `prod_run/` 的固定运行模板。
-- 在 yfinance provider 基础上补充 loader 和 DuckDB 入库链路。
+- 完善 yfinance 增量更新、标的类型映射和更多市场字段。
 
 长期方向：
 
