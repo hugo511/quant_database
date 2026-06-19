@@ -31,3 +31,4 @@ test_data/**
 prod_data/**
 !prod_data/
 !prod_data/.gitkeep
+test_self
