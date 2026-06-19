@@ -771,12 +771,15 @@ class MarketBarsFutureDailyDataset(BaseTushareDataset):
         start = DateParser.to_date(params["start"])
         end = DateParser.to_date(params["end"])
         instrument_ids = self.get_instrument_ids(params)
+        ranges_by_instrument = self.get_update_ranges_by_instrument(instrument_ids, start, end)
 
         frames: list[pl.DataFrame] = []
         total = len(instrument_ids)
+        fetch_ranges = 0
+        fetched_rows = 0
         for idx, instrument_id in enumerate(instrument_ids, start=1):
-            ranges_by_instrument = self.get_update_ranges_by_instrument([instrument_id], start, end)
             ranges = ranges_by_instrument.get(instrument_id, [])
+            fetch_ranges += len(ranges)
             for fetch_start, fetch_end in ranges:
                 raw = self.client.get_future_daily(
                     ts_code=instrument_id,
@@ -785,12 +788,25 @@ class MarketBarsFutureDailyDataset(BaseTushareDataset):
                     fields=params.get("fields"),
                 )
                 if not raw.empty:
-                    frames.append(pandas_to_polars(raw))
+                    frame = pandas_to_polars(raw)
+                    fetched_rows += frame.height
+                    frames.append(frame)
             if idx == 1 or idx % 200 == 0 or idx == total:
-                logger.info(f"market_bars_future_daily progress {idx}/{total}. ")
+                logger.info(
+                    f"market_bars_future_daily checked {idx}/{total}, "
+                    f"fetch_ranges={fetch_ranges}, fetched_rows={fetched_rows}. "
+                )
 
         if not frames:
+            logger.info(
+                f"market_bars_future_daily summary checked={total}, "
+                f"fetch_ranges={fetch_ranges}, fetched_rows={fetched_rows}. "
+            )
             return pl.DataFrame()
+        logger.info(
+            f"market_bars_future_daily summary checked={total}, "
+            f"fetch_ranges={fetch_ranges}, fetched_rows={fetched_rows}. "
+        )
         return pl.concat(frames, how="diagonal_relaxed")
 
     def fetch_raw(self, params: dict[str, Any]) -> pl.DataFrame:

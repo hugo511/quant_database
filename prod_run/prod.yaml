@@ -11,23 +11,23 @@ datasets:
 
   - source: tushare
     name: stock_st
-    enabled: false
+    enabled: true
 
   - source: tushare
     name: stock_daily
-    enabled: false
+    enabled: true
 
   - source: tushare
     name: etf_list
-    enabled: false
+    enabled: true
 
   - source: tushare
     name: market_bars_etf_daily
-    enabled: false
+    enabled: true
 
   - source: tushare
     name: index_list
-    enabled: false
+    enabled: true
     params:
       markets:
         - SSE
@@ -36,7 +36,7 @@ datasets:
 
   - source: tushare
     name: market_bars_index_daily
-    enabled: false
+    enabled: true
     params:
       index_codes:
         - 000001.SH

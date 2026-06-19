@@ -132,7 +132,7 @@ log_warning = logger.warning
 log_error = logger.error
 
 dir_path = os.getenv("LOG_DIR", os.path.join('./', "logs"))
-logger = Logger('delta_hedge', dir_path, retention=30)
+logger = Logger('quant_database', dir_path, retention=30)
 
 
 if __name__ == '__main__':
