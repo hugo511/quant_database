@@ -13,10 +13,10 @@ from quant_database.core.connection import connect
 from quant_database.core.upsert import upsert_frame
 from quant_database.providers.tushare_client import TushareClient, find_project_root
 from quant_database.schema.base import TableSchema
-from quant_database.schema.market import MARKET_BARS_DAILY, MARKET_BARS_DERIVATIVE_DAILY
+from quant_database.schema.market import MARKET_BARS_DAILY, MARKET_BARS_DERIVATIVE_DAILY, MARKET_FX_DAILY
 from quant_database.schema.reference import INSTRUMENT_STOCK_ST, REFERENCE_INSTRUMENT, REFERENCE_FUTURE
 from utils.logger import logger
-from utils.tools import DateFormatter, DateParser, DuckDBTableState, UpdateLocalParquet
+from utils.tools import DateParser, DuckDBTableState, UpdateLocalParquet
 
 
 @dataclass(frozen=True)
@@ -147,18 +147,64 @@ class BaseTushareDataset:
     def db_update_filters(self, params: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
-    def read_raw_for_table(self, params: dict[str, Any]) -> pl.DataFrame:
-        if not self.raw_path.exists():
-            return pl.DataFrame()
-
-        return self.filter_raw_for_table(pl.scan_parquet(self.raw_path), params).collect()
-
-    def filter_raw_for_table(
+    def get_update_ranges_by_instrument(
         self,
-        lazy_frame: pl.LazyFrame,
-        params: dict[str, Any],
-    ) -> pl.LazyFrame:
-        return lazy_frame
+        instrument_ids: list[str],
+        start: date,
+        end: date,
+        table: TableSchema | None = None,
+    ) -> dict[str, list[tuple[date, date]]]:
+        if not instrument_ids:
+            return {}
+
+        target_table = table or self.table
+        date_col = self.db_date_col or self.raw_date_col or "trade_date"
+        placeholders = ", ".join(["?"] * len(instrument_ids))
+
+        with connect(self.db_path) as con:
+            ensure_all_tables(con)
+            rows = con.execute(
+                f"""
+                SELECT instrument_id,
+                       min({date_col}) AS first_trade_date,
+                       max({date_col}) AS last_trade_date
+                FROM {target_table.name}
+                WHERE source_id = ?
+                  AND instrument_id IN ({placeholders})
+                GROUP BY instrument_id
+                """,
+                ["tushare", *instrument_ids],
+            ).fetchall()
+
+        state = {
+            instrument_id: (
+                DateParser.to_date(first_trade_date),
+                DateParser.to_date(last_trade_date),
+            )
+            for instrument_id, first_trade_date, last_trade_date in rows
+            if first_trade_date is not None and last_trade_date is not None
+        }
+
+        ranges_by_instrument: dict[str, list[tuple[date, date]]] = {}
+        for instrument_id in instrument_ids:
+            local_state = state.get(instrument_id)
+            if local_state is None:
+                ranges_by_instrument[instrument_id] = [(start, end)]
+                continue
+
+            local_first, local_last = local_state
+            ranges: list[tuple[date, date]] = []
+            if start < local_first:
+                ranges.append((start, local_first - timedelta(days=1)))
+            if end > local_last:
+                ranges.append((local_last + timedelta(days=1), end))
+            ranges_by_instrument[instrument_id] = [
+                (range_start, range_end)
+                for range_start, range_end in ranges
+                if range_start <= range_end
+            ]
+
+        return ranges_by_instrument
 
     def ensure_schema_columns(
         self,
@@ -253,18 +299,6 @@ class MarketBarsStockDailyDataset(BaseTushareDataset):
             return pl.DataFrame()
         return pl.concat(frames, how="diagonal_relaxed")
 
-    def filter_raw_for_table(
-        self,
-        lazy_frame: pl.LazyFrame,
-        params: dict[str, Any],
-    ) -> pl.LazyFrame:
-        start = DateFormatter.to_str(params["start"])
-        end = DateFormatter.to_str(params["end"])
-        return lazy_frame.filter(
-            (pl.col("trade_date").cast(pl.Utf8) >= start)
-            & (pl.col("trade_date").cast(pl.Utf8) <= end)
-        )
-
     def to_schema_frame(self, raw: pl.DataFrame, params: dict[str, Any]) -> pl.DataFrame:
         if raw.is_empty():
             return raw
@@ -328,28 +362,42 @@ class MarketBarsETFDailyDataset(BaseTushareDataset):
         start = DateParser.to_date(params["start"])
         end = DateParser.to_date(params["end"])
         instrument_ids = self.get_instrument_ids(params)
-        last_trade_dates = self.get_last_trade_dates(instrument_ids)
+        ranges_by_instrument = self.get_update_ranges_by_instrument(instrument_ids, start, end)
 
         frames: list[pl.DataFrame] = []
         total = len(instrument_ids)
+        fetch_ranges = 0
+        fetched_rows = 0
         for idx, instrument_id in enumerate(instrument_ids, start=1):
-            last_trade_date = last_trade_dates.get(instrument_id)
-            fetch_start = start if last_trade_date is None else last_trade_date + timedelta(days=1)
-            if fetch_start > end:
-                continue
-            raw = self.client.get_fund_daily(
-                ts_code=instrument_id,
-                start_date=fetch_start,
-                end_date=end,
-                fields=params.get("fields"),
-            )
-            if not raw.empty:
-                frames.append(pandas_to_polars(raw))
+            ranges = ranges_by_instrument.get(instrument_id, [])
+            fetch_ranges += len(ranges)
+            for fetch_start, fetch_end in ranges:
+                raw = self.client.get_fund_daily(
+                    ts_code=instrument_id,
+                    start_date=fetch_start,
+                    end_date=fetch_end,
+                    fields=params.get("fields"),
+                )
+                if not raw.empty:
+                    frame = pandas_to_polars(raw)
+                    fetched_rows += frame.height
+                    frames.append(frame)
             if idx % 200 == 0 or idx == total:
-                logger.info(f"market_bars_etf_daily progress {idx}/{total}. ")
+                logger.info(
+                    f"market_bars_etf_daily checked {idx}/{total}, "
+                    f"fetch_ranges={fetch_ranges}, fetched_rows={fetched_rows}. "
+                )
 
         if not frames:
+            logger.info(
+                f"market_bars_etf_daily summary checked={total}, "
+                f"fetch_ranges={fetch_ranges}, fetched_rows={fetched_rows}. "
+            )
             return pl.DataFrame()
+        logger.info(
+            f"market_bars_etf_daily summary checked={total}, "
+            f"fetch_ranges={fetch_ranges}, fetched_rows={fetched_rows}. "
+        )
         return pl.concat(frames, how="diagonal_relaxed")
 
     def fetch_raw(self, params: dict[str, Any]) -> pl.DataFrame:
@@ -387,33 +435,6 @@ class MarketBarsETFDailyDataset(BaseTushareDataset):
             raise ValueError("No Tushare ETF instruments found. Run dataset `etf_list` first.")
         return instrument_ids
 
-    def get_last_trade_dates(self, instrument_ids: list[str]) -> dict[str, date]:
-        if not instrument_ids:
-            return {}
-
-        placeholders = ", ".join(["?"] * len(instrument_ids))
-        with connect(self.db_path) as con:
-            ensure_all_tables(con)
-            rows = con.execute(
-                f"""
-                SELECT instrument_id, max(trade_date) AS last_trade_date
-                FROM market_bars_daily
-                WHERE source_id = 'tushare'
-                  AND instrument_id IN ({placeholders})
-                GROUP BY instrument_id
-                """,
-                instrument_ids,
-            ).fetchall()
-        return {instrument_id: last_trade_date for instrument_id, last_trade_date in rows}
-
-    def filter_raw_for_table(self, lazy_frame: pl.LazyFrame, params: dict[str, Any]) -> pl.LazyFrame:
-        start = DateFormatter.to_str(params["start"])
-        end = DateFormatter.to_str(params["end"])
-        return lazy_frame.filter(
-            (pl.col("trade_date").cast(pl.Utf8) >= start)
-            & (pl.col("trade_date").cast(pl.Utf8) <= end)
-        )
-    
     def to_schema_frame(self, raw: pl.DataFrame, params: dict[str, Any]) -> pl.DataFrame:
         if raw.is_empty():
             return raw
@@ -491,26 +512,34 @@ class MarketBarsIndexDaily(BaseTushareDataset):
     def fetch_incremental(self, params: dict[str, Any]) -> pl.DataFrame:
         start = DateParser.to_date(params["start"])
         end = DateParser.to_date(params["end"])
+        api = self.get_api(params)
         instrument_ids = self.get_instrument_ids(params)
-        last_trade_dates = self.get_last_trade_dates(instrument_ids)
 
         frames: list[pl.DataFrame] = []
         total = len(instrument_ids)
+        logger.info(f"market_bars_index_daily api={api} start={start} end={end} instruments={total}. ")
         for idx, instrument_id in enumerate(instrument_ids, start=1):
-            last_trade_date = last_trade_dates.get(instrument_id)
-            fetch_start = start if last_trade_date is None else last_trade_date + timedelta(days=1)
-            if fetch_start > end:
-                continue
-            raw = self.client.get_index_daily(
-                ts_code=instrument_id,
-                start_date=fetch_start,
-                end_date=end,
-                fields=params.get("fields"),
-            )
-            if not raw.empty:
-                frames.append(pandas_to_polars(raw))
+            ranges_by_instrument = self.get_update_ranges_by_instrument([instrument_id], start, end)
+            ranges = ranges_by_instrument.get(instrument_id, [])
+            for fetch_start, fetch_end in ranges:
+                raw = self.fetch_index_raw(
+                    ts_code=instrument_id,
+                    start_date=fetch_start,
+                    end_date=fetch_end,
+                    fields=params.get("fields"),
+                    params=params,
+                )
+                if not raw.empty:
+                    frame = pandas_to_polars(raw)
+                    # # 兼容没有amount列的数据
+                    # if "amount" not in frame.columns:
+                    #     frame = frame.with_columns(pl.lit(None, dtype=pl.Float64).alias("amount"))
+                    frames.append(frame)
             if idx % 200 == 0 or idx == total:
-                logger.info(f"market_bars_index_daily progress {idx}/{total}. ")
+                logger.info(
+                    f"market_bars_index_daily api={api} progress {idx}/{total}, "
+                    f"current={instrument_id}. "
+                )
 
         if not frames:
             return pl.DataFrame()
@@ -518,6 +547,41 @@ class MarketBarsIndexDaily(BaseTushareDataset):
 
     def fetch_raw(self, params: dict[str, Any]) -> pl.DataFrame:
         return self.fetch_incremental(params)
+
+    def get_api(self, params: dict[str, Any]) -> str:
+        return params.get("api") or params.get("index_api") or "index_daily"
+
+    def fetch_index_raw(
+        self,
+        ts_code: str,
+        start_date: date,
+        end_date: date,
+        fields: list[str] | None,
+        params: dict[str, Any],
+    ) -> pd.DataFrame:
+        api = self.get_api(params)
+        if api == "index_daily":
+            return self.client.get_index_daily(
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date,
+                fields=fields,
+            )
+        if api == "index_global":
+            return self.client.get_index_global(
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date,
+                fields=fields,
+            )
+        if api == "fut_index_daily":
+            return self.client.get_future_index_daily(
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date,
+                fields=fields,
+            )
+        raise ValueError(f"Unsupported Tushare index api: {api}")
 
     def get_instrument_ids(self, params: dict[str, Any]) -> list[str]:
         if params.get("index_codes"):
@@ -561,33 +625,6 @@ class MarketBarsIndexDaily(BaseTushareDataset):
         if not instrument_ids:
             raise ValueError("No Tushare index instruments found. Run dataset `index_list` first.")
         return instrument_ids
-
-    def get_last_trade_dates(self, instrument_ids: list[str]) -> dict[str, date]:
-        if not instrument_ids:
-            return {}
-
-        placeholders = ", ".join(["?"] * len(instrument_ids))
-        with connect(self.db_path) as con:
-            ensure_all_tables(con)
-            rows = con.execute(
-                f"""
-                SELECT instrument_id, max(trade_date) AS last_trade_date
-                FROM market_bars_daily
-                WHERE source_id = 'tushare'
-                  AND instrument_id IN ({placeholders})
-                GROUP BY instrument_id
-                """,
-                instrument_ids,
-            ).fetchall()
-        return {instrument_id: last_trade_date for instrument_id, last_trade_date in rows}
-
-    def filter_raw_for_table(self, lazy_frame: pl.LazyFrame, params: dict[str, Any]) -> pl.LazyFrame:
-        start = DateFormatter.to_str(params["start"])
-        end = DateFormatter.to_str(params["end"])
-        return lazy_frame.filter(
-            (pl.col("trade_date").cast(pl.Utf8) >= start)
-            & (pl.col("trade_date").cast(pl.Utf8) <= end)
-        )
 
     def to_schema_frame(self, raw: pl.DataFrame, params: dict[str, Any]) -> pl.DataFrame:
         if raw.is_empty():
@@ -734,24 +771,21 @@ class MarketBarsFutureDailyDataset(BaseTushareDataset):
         start = DateParser.to_date(params["start"])
         end = DateParser.to_date(params["end"])
         instrument_ids = self.get_instrument_ids(params)
-        last_trade_dates = self.get_last_trade_dates(instrument_ids)
 
         frames: list[pl.DataFrame] = []
         total = len(instrument_ids)
         for idx, instrument_id in enumerate(instrument_ids, start=1):
-            last_trade_date = last_trade_dates.get(instrument_id)
-            fetch_start = start if last_trade_date is None else last_trade_date + timedelta(days=1)
-            if fetch_start > end:
-                continue
-
-            raw = self.client.get_future_daily(
-                ts_code=instrument_id,
-                start_date=fetch_start,
-                end_date=end,
-                fields=params.get("fields"),
-            )
-            if not raw.empty:
-                frames.append(pandas_to_polars(raw))
+            ranges_by_instrument = self.get_update_ranges_by_instrument([instrument_id], start, end)
+            ranges = ranges_by_instrument.get(instrument_id, [])
+            for fetch_start, fetch_end in ranges:
+                raw = self.client.get_future_daily(
+                    ts_code=instrument_id,
+                    start_date=fetch_start,
+                    end_date=fetch_end,
+                    fields=params.get("fields"),
+                )
+                if not raw.empty:
+                    frames.append(pandas_to_polars(raw))
             if idx == 1 or idx % 200 == 0 or idx == total:
                 logger.info(f"market_bars_future_daily progress {idx}/{total}. ")
 
@@ -794,35 +828,8 @@ class MarketBarsFutureDailyDataset(BaseTushareDataset):
             raise ValueError("No Tushare future instruments found. Run dataset `future_list` first.")
         return instrument_ids
 
-    def get_last_trade_dates(self, instrument_ids: list[str]) -> dict[str, date]:
-        if not instrument_ids:
-            return {}
-
-        placeholders = ", ".join(["?"] * len(instrument_ids))
-        with connect(self.db_path) as con:
-            ensure_all_tables(con)
-            rows = con.execute(
-                f"""
-                SELECT instrument_id, max(trade_date) AS last_trade_date
-                FROM market_bars_derivative_daily
-                WHERE source_id = 'tushare'
-                  AND instrument_id IN ({placeholders})
-                GROUP BY instrument_id
-                """,
-                instrument_ids,
-            ).fetchall()
-        return {instrument_id: last_trade_date for instrument_id, last_trade_date in rows}
-
     def db_update_filters(self, params: dict[str, Any]) -> dict[str, Any] | None:
         return {"source_id": "tushare"}
-
-    def filter_raw_for_table(self, lazy_frame: pl.LazyFrame, params: dict[str, Any]) -> pl.LazyFrame:
-        start = DateFormatter.to_str(params["start"])
-        end = DateFormatter.to_str(params["end"])
-        return lazy_frame.filter(
-            (pl.col("trade_date").cast(pl.Utf8) >= start)
-            & (pl.col("trade_date").cast(pl.Utf8) <= end)
-        )
 
     def to_schema_frame(self, raw: pl.DataFrame, params: dict[str, Any]) -> pl.DataFrame:
         if raw.is_empty():
@@ -839,6 +846,192 @@ class MarketBarsFutureDailyDataset(BaseTushareDataset):
         return self.ensure_schema_columns(df)
 
 
+class MarketFXDailyDataset(BaseTushareDataset):
+    name = "market_fx_daily"
+    table = MARKET_FX_DAILY
+    raw_name = "fx_daily"
+    raw_unique_subset = ["ts_code", "trade_date"]
+    raw_sort_by = ["ts_code", "trade_date"]
+    raw_date_col = "trade_date"
+    db_date_col = "trade_date"
+    incremental = True
+
+    def update(self, **params: Any) -> LoadResult:
+        raw_update = self.fetch_incremental(params)
+        if raw_update.is_empty():
+            return LoadResult(
+                dataset=self.name,
+                raw_path=self.raw_path,
+                db_path=self.db_path,
+                raw_rows=0,
+                rows_written=0,
+            )
+
+        UpdateLocalParquet.update(
+            self.raw_path,
+            raw_update,
+            unique_subset=self.raw_unique_subset,
+            sort_by=self.raw_sort_by,
+        )
+
+        reference_frame = REFERENCE_INSTRUMENT.model.format_polars(
+            self.to_reference_instrument_frame(raw_update, params)
+        )
+        fx_frame = MARKET_FX_DAILY.model.format_polars(
+            self.to_schema_frame(raw_update, params)
+        )
+
+        with connect(self.db_path) as con:
+            ensure_all_tables(con)
+            rows_written = upsert_frame(con, REFERENCE_INSTRUMENT, reference_frame)
+            rows_written += upsert_frame(con, MARKET_FX_DAILY, fx_frame)
+
+        return LoadResult(
+            dataset=self.name,
+            raw_path=self.raw_path,
+            db_path=self.db_path,
+            raw_rows=raw_update.height,
+            rows_written=rows_written,
+        )
+
+    def fetch_incremental(self, params: dict[str, Any]) -> pl.DataFrame:
+        start = DateParser.to_date(params["start"])
+        end = DateParser.to_date(params["end"])
+        instrument_ids = self.get_instrument_ids(params)
+
+        frames: list[pl.DataFrame] = []
+        total = len(instrument_ids)
+        for idx, instrument_id in enumerate(instrument_ids, start=1):
+            ranges_by_instrument = self.get_update_ranges_by_instrument([instrument_id], start, end)
+            ranges = ranges_by_instrument.get(instrument_id, [])
+            for fetch_start, fetch_end in ranges:
+                raw = self.client.get_fx_daily(
+                    ts_code=instrument_id,
+                    start_date=fetch_start,
+                    end_date=fetch_end,
+                    exchange=params.get("exchange"),
+                    fields=params.get("fields"),
+                )
+                if not raw.empty:
+                    frames.append(pandas_to_polars(raw))
+            if idx == 1 or idx % 200 == 0 or idx == total:
+                logger.info(f"market_fx_daily progress {idx}/{total}. ")
+
+        if not frames:
+            return pl.DataFrame()
+        return pl.concat(frames, how="diagonal_relaxed")
+
+    def fetch_raw(self, params: dict[str, Any]) -> pl.DataFrame:
+        return self.fetch_incremental(params)
+
+    def get_instrument_ids(self, params: dict[str, Any]) -> list[str]:
+        codes = params.get("ts_codes") or params.get("ts_code")
+        if codes is None:
+            raise ValueError("market_fx_daily requires `ts_codes` or `ts_code`.")
+        if isinstance(codes, str):
+            return [codes]
+        return sorted(codes)
+
+    def to_reference_instrument_frame(
+        self,
+        raw: pl.DataFrame,
+        params: dict[str, Any],
+    ) -> pl.DataFrame:
+        if raw.is_empty():
+            return raw
+
+        df = raw.select("ts_code").unique().with_columns(
+            [
+                pl.col("ts_code").alias("instrument_id"),
+                pl.col("ts_code").alias("symbol"),
+                pl.col("ts_code").alias("name"),
+                pl.col("ts_code").alias("full_name"),
+                pl.lit("FX").alias("market"),
+                pl.col("ts_code")
+                .str.extract(r"\.([^.]+)$", 1)
+                .fill_null(params.get("exchange") or "FX")
+                .alias("exchange"),
+                pl.col("ts_code").str.extract(r"^[A-Z]{3}([A-Z]{3})", 1).alias("currency"),
+                pl.lit("L").alias("list_status"),
+                pl.lit(False).alias("is_hs"),
+                pl.col("ts_code").alias("source_code"),
+                pl.lit("tushare").alias("source_id"),
+                pl.lit("fx").alias("asset_class"),
+                pl.lit("currency_pair").alias("instrument_type"),
+            ]
+        )
+        return self.ensure_schema_columns(df, REFERENCE_INSTRUMENT)
+
+    def to_schema_frame(self, raw: pl.DataFrame, params: dict[str, Any]) -> pl.DataFrame:
+        if raw.is_empty():
+            return raw
+
+        df = self.ensure_fx_quote_columns(raw).with_columns(
+            [
+                pl.col("ts_code").alias("instrument_id"),
+                pl.col("ts_code").alias("source_code"),
+                pl.lit("tushare").alias("source_id"),
+                pl.col("bid_open").cast(pl.Float64, strict=False).alias("bid_open"),
+                pl.col("bid_high").cast(pl.Float64, strict=False).alias("bid_high"),
+                pl.col("bid_low").cast(pl.Float64, strict=False).alias("bid_low"),
+                pl.col("bid_close").cast(pl.Float64, strict=False).alias("bid_close"),
+                pl.col("ask_open").cast(pl.Float64, strict=False).alias("ask_open"),
+                pl.col("ask_high").cast(pl.Float64, strict=False).alias("ask_high"),
+                pl.col("ask_low").cast(pl.Float64, strict=False).alias("ask_low"),
+                pl.col("ask_close").cast(pl.Float64, strict=False).alias("ask_close"),
+                (
+                    (
+                        pl.col("bid_open").cast(pl.Float64, strict=False)
+                        + pl.col("ask_open").cast(pl.Float64, strict=False)
+                    )
+                    / 2
+                ).alias("mid_open"),
+                (
+                    (
+                        pl.col("bid_high").cast(pl.Float64, strict=False)
+                        + pl.col("ask_high").cast(pl.Float64, strict=False)
+                    )
+                    / 2
+                ).alias("mid_high"),
+                (
+                    (
+                        pl.col("bid_low").cast(pl.Float64, strict=False)
+                        + pl.col("ask_low").cast(pl.Float64, strict=False)
+                    )
+                    / 2
+                ).alias("mid_low"),
+                (
+                    (
+                        pl.col("bid_close").cast(pl.Float64, strict=False)
+                        + pl.col("ask_close").cast(pl.Float64, strict=False)
+                    )
+                    / 2
+                ).alias("mid_close"),
+                (
+                    pl.col("ask_close").cast(pl.Float64, strict=False)
+                    - pl.col("bid_close").cast(pl.Float64, strict=False)
+                ).alias("spread_close"),
+                pl.lit(datetime.now()).alias("updated_at"),
+            ]
+        )
+        return self.ensure_schema_columns(df)
+
+    def ensure_fx_quote_columns(self, df: pl.DataFrame) -> pl.DataFrame:
+        for column in [
+            "bid_open",
+            "bid_high",
+            "bid_low",
+            "bid_close",
+            "ask_open",
+            "ask_high",
+            "ask_low",
+            "ask_close",
+        ]:
+            if column not in df.columns:
+                df = df.with_columns(pl.lit(None, dtype=pl.Float64).alias(column))
+        return df
+
+
 
 DATASET_CLASSES: dict[str, type[BaseTushareDataset]] = {
     InstrumentStockDataset.name: InstrumentStockDataset,
@@ -850,6 +1043,7 @@ DATASET_CLASSES: dict[str, type[BaseTushareDataset]] = {
     MarketBarsIndexDaily.name: MarketBarsIndexDaily,
     InstrumentFutureDataset.name: InstrumentFutureDataset,
     MarketBarsFutureDailyDataset.name: MarketBarsFutureDailyDataset,
+    MarketFXDailyDataset.name: MarketFXDailyDataset,
 }
 
 

@@ -16,10 +16,18 @@ wheels/
 .env
 
 # Local run artifacts
-logs/*.log
+test_logs/**
+!test_logs/
+!test_logs/.gitkeep
+prod_logs/**
+!prod_logs/
+!prod_logs/.gitkeep
 data/**
 !data/
 !data/.gitkeep
 test_data/**
 !test_data/
 !test_data/.gitkeep
+prod_data/**
+!prod_data/
+!prod_data/.gitkeep

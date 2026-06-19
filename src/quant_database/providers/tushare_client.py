@@ -306,9 +306,6 @@ class TushareClient:
             raise ValueError("get_stock_daily requires trade_date or start/end.")
 
         # 涨跌幅 % -> 涨跌幅 decimal
-        if "pct_chg" in df.columns:
-            df["pct_chg"] = df["pct_chg"] / 100
-
         return df
 
     @retry_on_exception
@@ -517,6 +514,99 @@ class TushareClient:
             df["pct_chg"] = df["pct_chg"] / 100
         
         return df
+
+    @retry_on_exception
+    def get_index_global(
+        self,
+        ts_code: str | None = None,
+        trade_date: date | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        fields: list[str] | None = None,
+    ) -> pd.DataFrame:
+        """
+        获取国际主要指数日线行情
+            https://tushare.pro/document/2?doc_id=211
+        :param ts_code: 指数代码，例如 HKTECH, HSI, N225
+        :param trade_date: 交易日期
+        :param start_date: 开始日期
+        :param end_date: 结束日期
+        :param fields: 指定字段
+        :return: 国际主要指数日线行情
+        """
+        if fields is None:
+            fields = [
+                "ts_code",
+                "trade_date",
+                "open",
+                "high",
+                "low",
+                "close",
+                "pre_close",
+                "change",
+                "pct_chg",
+                "vol",
+                "amount"
+            ]
+
+        df = self.pro.query(
+            "index_global",
+            ts_code=ts_code,
+            trade_date=self.parse_date_to_str(trade_date) if trade_date else None,
+            start_date=self.parse_date_to_str(start_date) if start_date else None,
+            end_date=self.parse_date_to_str(end_date) if end_date else None,
+            fields=_fields(fields),
+        )
+
+        if "pct_chg" in df.columns:
+            df["pct_chg"] = df["pct_chg"] / 100
+
+        return df
+
+    @retry_on_exception
+    def get_future_index_daily(
+        self,
+        ts_code: str,
+        trade_date: date | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        fields: list[str] | None = None,
+    ) -> pd.DataFrame:
+        """
+        获取南华期货指数日线行情
+            https://tushare.pro/document/2?doc_id=468
+        :param ts_code: 指数代码，例如 NHCI.NH, NHAI.NH
+        :param trade_date: 交易日期
+        :param start_date: 开始日期
+        :param end_date: 结束日期
+        :param fields: 指定字段
+        :return: 南华期货指数日线行情
+        """
+        if fields is None:
+            fields = [
+                "ts_code",
+                "trade_date",
+                "open",
+                "high",
+                "low",
+                "close",
+                "pre_close",
+                "change",
+                "pct_chg",
+                "vol",
+                "amount",
+            ]
+
+        df = self.pro.query(
+            "fut_index_daily",
+            ts_code=ts_code,
+            trade_date=self.parse_date_to_str(trade_date) if trade_date else None,
+            start_date=self.parse_date_to_str(start_date) if start_date else None,
+            end_date=self.parse_date_to_str(end_date) if end_date else None,
+            fields=_fields(fields),
+        )
+
+        return df
     
     @retry_on_exception
     def get_future_basic(
@@ -601,6 +691,50 @@ class TushareClient:
             start_date=self.parse_date_to_str(start_date) if start_date else None,
             end_date=self.parse_date_to_str(end_date) if end_date else None,
             fields=fields,
+        )
+
+    @retry_on_exception
+    def get_fx_daily(
+        self,
+        ts_code: str | None = None,
+        trade_date: date | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        exchange: str | None = None,
+        fields: list[str] | None = None,
+    ) -> pd.DataFrame:
+        """
+        获取外汇日线行情
+            https://tushare.pro/document/2?doc_id=179
+        :param ts_code: 外汇代码，例如 EURUSD
+        :param trade_date: 交易日期
+        :param start_date: 开始日期
+        :param end_date: 结束日期
+        :param exchange: 来源/交易商
+        :param fields: 指定字段
+        :return: 外汇日线双边报价
+        """
+        if fields is None:
+            fields = [
+                "ts_code",
+                "trade_date",
+                "bid_open",
+                "bid_close",
+                "bid_high",
+                "bid_low",
+                "ask_open",
+                "ask_close",
+                "ask_high",
+                "ask_low",
+            ]
+
+        return self.pro.fx_daily(
+            ts_code=ts_code,
+            trade_date=self.parse_date_to_str(trade_date) if trade_date else None,
+            start_date=self.parse_date_to_str(start_date) if start_date else None,
+            end_date=self.parse_date_to_str(end_date) if end_date else None,
+            exchange=exchange,
+            fields=_fields(fields),
         )
 
 

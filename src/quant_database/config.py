@@ -7,6 +7,39 @@ from typing import Any
 import yaml
 
 from quant_database.providers.tushare_client import find_project_root
+from utils.tools import DateParser
+
+
+DATASETS_WITH_DATE_RANGE = {
+    "stock_st",
+    "stock_daily",
+    "market_bars_etf_daily",
+    "market_bars_index_daily",
+    "market_bars_future_daily",
+    "market_fx_daily",
+    "yf_market_bars_daily",
+}
+
+
+@dataclass(frozen=True)
+class DateRangeConfig:
+    start: Any
+    end: Any
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DateRangeConfig:
+        if "start" not in data or "end" not in data:
+            raise ValueError("date_range requires both `start` and `end`.")
+        return cls(
+            start=DateParser.to_date(data["start"]),
+            end=DateParser.to_date(data["end"]),
+        )
+
+    def apply_defaults(self, params: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(params)
+        merged.setdefault("start", self.start)
+        merged.setdefault("end", self.end)
+        return merged
 
 
 @dataclass(frozen=True)
@@ -29,7 +62,7 @@ class DatasetRunConfig:
 @dataclass(frozen=True)
 class TushareRunConfig:
     run_env: str = "test"
-    run_date: str | None = None
+    date_range: DateRangeConfig | None = None
     root_dir: str | None = None
     db_path: str | None = None
     datasets: list[DatasetRunConfig] = field(default_factory=list)
@@ -46,13 +79,18 @@ class TushareRunConfig:
         data: dict[str, Any],
         config_path: Path | None = None,
     ) -> TushareRunConfig:
+        date_range = (
+            DateRangeConfig.from_dict(data["date_range"])
+            if data.get("date_range") is not None
+            else None
+        )
         datasets = [
-            DatasetRunConfig.from_dict(item)
+            cls._dataset_from_dict(item, date_range)
             for item in data.get("datasets", [])
         ]
         config = cls(
             run_env=data.get("run_env", "test"),
-            run_date=str(data["run_date"]) if data.get("run_date") is not None else None,
+            date_range=date_range,
             root_dir=data.get("root_dir"),
             db_path=data.get("db_path"),
             datasets=datasets,
@@ -60,6 +98,21 @@ class TushareRunConfig:
         if not config.datasets:
             raise ValueError("Config requires at least one dataset.")
         return config
+
+    @staticmethod
+    def _dataset_from_dict(
+        data: dict[str, Any],
+        date_range: DateRangeConfig | None,
+    ) -> DatasetRunConfig:
+        dataset = DatasetRunConfig.from_dict(data)
+        if date_range is None or dataset.name not in DATASETS_WITH_DATE_RANGE:
+            return dataset
+        return DatasetRunConfig(
+            name=dataset.name,
+            source=dataset.source,
+            enabled=dataset.enabled,
+            params=date_range.apply_defaults(dataset.params),
+        )
 
     def resolved_root_dir(self, config_path: str | Path | None = None) -> Path:
         project_root = find_project_root()

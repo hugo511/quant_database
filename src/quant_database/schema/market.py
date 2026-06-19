@@ -49,6 +49,28 @@ class MarketBarsDerivativeDaily(SchemaModel):
     updated_at: datetime
 
 
+@dataclass
+class MarketFXDaily(SchemaModel):
+    instrument_id: str
+    trade_date: date
+    bid_open: float | None
+    bid_high: float | None
+    bid_low: float | None
+    bid_close: float | None
+    ask_open: float | None
+    ask_high: float | None
+    ask_low: float | None
+    ask_close: float | None
+    mid_open: float | None
+    mid_high: float | None
+    mid_low: float | None
+    mid_close: float | None
+    spread_close: float | None
+    source_code: str
+    source_id: str
+    updated_at: datetime
+
+
 
 
 MARKET_BARS_DAILY = TableSchema(
@@ -64,6 +86,14 @@ MARKET_BARS_DERIVATIVE_DAILY = TableSchema(
     model=MarketBarsDerivativeDaily,
     primary_key=("instrument_id", "trade_date"),
     description="市场期货日线行情表",
+    indexes=(("instrument_id", "trade_date"), ("source_id", "trade_date")),
+)
+
+MARKET_FX_DAILY = TableSchema(
+    name="market_fx_daily",
+    model=MarketFXDaily,
+    primary_key=("instrument_id", "trade_date"),
+    description="外汇日线双边报价表",
     indexes=(("instrument_id", "trade_date"), ("source_id", "trade_date")),
 )
 

@@ -1,40 +1,41 @@
-run_env: test
-root_dir: test_data
+run_env: prod
+root_dir: prod_data
 date_range:
-  start: 2026-05-27
-  end: 2026-05-27
+  start: 2026-06-18
+  end: today
+
 datasets:
-
-  - name: stock_list
+  - source: tushare
+    name: stock_list
     enabled: false
-    source: tushare
 
-  - name: stock_st
+  - source: tushare
+    name: stock_st
     enabled: false
-    source: tushare
 
-  - name: stock_daily
+  - source: tushare
+    name: stock_daily
     enabled: false
-    source: tushare
 
-  - name: etf_list
+  - source: tushare
+    name: etf_list
     enabled: false
-    source: tushare
 
-  - name: market_bars_etf_daily
+  - source: tushare
+    name: market_bars_etf_daily
     enabled: false
-    source: tushare
 
-  - name: index_list
+  - source: tushare
+    name: index_list
     enabled: false
     params:
       markets:
         - SSE
         - SZSE
         - CSI
-    source: tushare
 
-  - name: market_bars_index_daily
+  - source: tushare
+    name: market_bars_index_daily
     enabled: false
     params:
       index_codes:
@@ -74,24 +75,20 @@ datasets:
         - H11077.CSI
         - H20914.CSI
         - 980080.CNI
-    source: tushare
 
-  - name: market_bars_index_daily
+  - source: tushare
+    name: market_bars_index_daily
     enabled: true
     params:
       api: index_global
-      start: 2026-06-01
-      end: 2026-06-18
       index_codes:
         - HKTECH
-    source: tushare
 
-  - name: market_bars_index_daily
+  - source: tushare
+    name: market_bars_index_daily
     enabled: true
     params:
       api: fut_index_daily
-      start: 2026-06-01
-      end: 2026-06-18
       index_codes:
         - M.NH
         - NHFI.NH
@@ -99,10 +96,10 @@ datasets:
         - T.NH
         - TL.NH
         - AU.NH
-    source: tushare
 
-  - name: future_list
-    enabled: false
+  - source: tushare
+    name: future_list
+    enabled: true
     params:
       exchanges:
         - CFFEX
@@ -111,19 +108,18 @@ datasets:
         - SHFE
         - INE
         - GFEX
-    source: tushare
 
-  - name: market_bars_future_daily
-    enabled: false
-    source: tushare
+  - source: tushare
+    name: market_bars_future_daily
+    enabled: true
 
-  - name: market_fx_daily
+  - source: tushare
+    name: market_fx_daily
     enabled: true
     params:
       ts_codes:
         - USDCNH.FXCM
         - USDHKD.FXCM
-    source: tushare
 
   - source: yfinance
     name: yf_instrument
@@ -141,10 +137,8 @@ datasets:
     name: yf_market_bars_daily
     enabled: true
     params:
-      start: '2026-06-01'
-      end: '2026-06-09'
       interval: 1d
       auto_adjust: false
-      actions: true
+      actions: true # 载行情时同时带上分红和拆股信息
       repair: false
-      threads: true
+      threads: true # 多 ticker 下载时启用并发线程

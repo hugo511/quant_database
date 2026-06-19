@@ -1,0 +1,112 @@
+run_env: prod
+root_dir: prod_data
+date_range:
+  start: 2026-06-01
+  end: 2026-06-18
+
+datasets:
+  - source: tushare
+    name: stock_list
+    enabled: false
+
+  - source: tushare
+    name: stock_st
+    enabled: false
+
+  - source: tushare
+    name: stock_daily
+    enabled: false
+
+  - source: tushare
+    name: etf_list
+    enabled: false
+
+  - source: tushare
+    name: market_bars_etf_daily
+    enabled: false
+    params:
+      ts_codes:
+        - 510300.SH
+
+  - source: tushare
+    name: index_list
+    enabled: false
+    params:
+      markets:
+        - SSE
+        - SZSE
+        - CSI
+
+  - source: tushare
+    name: market_bars_index_daily
+    enabled: false
+    params:
+      index_codes:
+        - 000001.SH
+
+  - source: tushare
+    name: market_bars_index_daily
+    enabled: false
+    params:
+      api: index_global
+      index_codes:
+        - HKTECH
+
+  - source: tushare
+    name: market_bars_index_daily
+    enabled: false
+    params:
+      api: fut_index_daily
+      index_codes:
+        - M.NH
+        - NHFI.NH
+        - NHECI.NH
+
+  - source: tushare
+    name: future_list
+    enabled: false
+    params:
+      exchanges:
+        - CFFEX
+        - DCE
+        - CZCE
+        - SHFE
+        - INE
+        - GFEX
+
+  - source: tushare
+    name: market_bars_future_daily
+    enabled: false
+    params:
+      ts_codes:
+        - IF2606.CFFEX
+
+  - source: tushare
+    name: market_fx_daily
+    enabled: false
+    params:
+      ts_codes:
+        - USDCNH.FXCM
+        - USDHKD.FXCM
+
+  - source: yfinance
+    name: yf_instrument
+    enabled: false
+    params:
+      tickers:
+        - 3032.HK
+        - ONEQ
+
+  - source: yfinance
+    name: yf_market_bars_daily
+    enabled: false
+    params:
+      tickers:
+        - 3032.HK
+        - ONEQ
+        - ^NDX
+      interval: 1d
+      auto_adjust: false
+      actions: true
+      repair: false
+      threads: true

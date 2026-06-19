@@ -35,6 +35,8 @@ class DateParser:
         text = value.strip()
         if not text:
             raise ValueError("Date string cannot be empty.")
+        if text.lower() == "today":
+            return date.today()
 
         for fmt in cls.SUPPORTED_FORMATS:
             try:
@@ -44,7 +46,7 @@ class DateParser:
 
         raise ValueError(
             f"Unsupported date format: {value!r}. "
-            "Expected YYYYMMDD, YYYY-MM-DD, or YYYY/MM/DD."
+            "Expected today, YYYYMMDD, YYYY-MM-DD, or YYYY/MM/DD."
         )
 
 

@@ -9,12 +9,12 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-os.environ["LOG_DIR"] = str(ROOT / "test_logs")
+os.environ["LOG_DIR"] = str(ROOT / "prod_logs")
 
 from quant_database.cli import main
 
 
-DEFAULT_CONFIG = Path(__file__).with_name("one_day.yaml")
+DEFAULT_CONFIG = Path(__file__).with_name("backfill.yaml")
 
 
 if __name__ == "__main__":
