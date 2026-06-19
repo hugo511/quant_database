@@ -253,9 +253,39 @@ class InstrumentStockStDataset(BaseTushareDataset):
     raw_sort_by = ["trade_date", "ts_code"]
 
     def fetch_raw(self, params: dict[str, Any]) -> pl.DataFrame:
-        return pandas_to_polars(
-            self.client.get_stock_st(start=params["start"], end=params["end"], fields=params.get("fields"))
+        start = DateParser.to_date(params["start"])
+        end = DateParser.to_date(params["end"])
+        frames: list[pl.DataFrame] = []
+        current = start
+        checked_days = 0
+        fetched_rows = 0
+        total_days = (end - start).days + 1
+        logger.info(f"[stock_st] start={start} end={end} days={total_days}. ")
+        while current <= end:
+            raw = self.client.get_stock_st(
+                start=current,
+                end=current,
+                fields=params.get("fields"),
+            )
+            checked_days += 1
+            if not raw.empty:
+                frame = pandas_to_polars(raw)
+                fetched_rows += frame.height
+                frames.append(frame)
+            if checked_days % 30 == 0 or current == end:
+                logger.info(
+                    f"[stock_st] checked_days={checked_days}/{total_days}, "
+                    f"current={current}, fetched_rows={fetched_rows}. "
+                )
+            current = current + timedelta(days=1)
+
+        logger.info(
+            f"[stock_st] summary checked_days={checked_days}, "
+            f"fetched_rows={fetched_rows}. "
         )
+        if not frames:
+            return pl.DataFrame()
+        return pl.concat(frames, how="diagonal_relaxed")
     
     def to_schema_frame(self, raw: pl.DataFrame, params: dict[str, Any]) -> pl.DataFrame:
         if raw.is_empty():
@@ -286,15 +316,31 @@ class MarketBarsStockDailyDataset(BaseTushareDataset):
         end = DateParser.to_date(params["end"])
         frames: list[pl.DataFrame] = []
         current = start
+        checked_days = 0
+        fetched_rows = 0
+        total_days = (end - start).days + 1
+        logger.info(f"[stock_daily] start={start} end={end} days={total_days}. ")
         while current <= end:
             raw = self.client.get_stock_daily(
                 trade_date=current,
                 fields=params.get("fields"),
             )
+            checked_days += 1
             if not raw.empty:
-                frames.append(pandas_to_polars(raw))
+                frame = pandas_to_polars(raw)
+                fetched_rows += frame.height
+                frames.append(frame)
+            if checked_days % 30 == 0 or current == end:
+                logger.info(
+                    f"[stock_daily] checked_days={checked_days}/{total_days}, "
+                    f"fetched_rows={fetched_rows}. "
+                )
             current = current + timedelta(days=1)
 
+        logger.info(
+            f"[stock_daily] summary checked_days={checked_days}, "
+            f"fetched_rows={fetched_rows}. "
+        )
         if not frames:
             return pl.DataFrame()
         return pl.concat(frames, how="diagonal_relaxed")
@@ -384,18 +430,18 @@ class MarketBarsETFDailyDataset(BaseTushareDataset):
                     frames.append(frame)
             if idx % 200 == 0 or idx == total:
                 logger.info(
-                    f"market_bars_etf_daily checked {idx}/{total}, "
+                    f"[market_bars_etf_daily] checked {idx}/{total}, "
                     f"fetch_ranges={fetch_ranges}, fetched_rows={fetched_rows}. "
                 )
 
         if not frames:
             logger.info(
-                f"market_bars_etf_daily summary checked={total}, "
+                f"[market_bars_etf_daily] summary checked={total}, "
                 f"fetch_ranges={fetch_ranges}, fetched_rows={fetched_rows}. "
             )
             return pl.DataFrame()
         logger.info(
-            f"market_bars_etf_daily summary checked={total}, "
+            f"[market_bars_etf_daily] summary checked={total}, "
             f"fetch_ranges={fetch_ranges}, fetched_rows={fetched_rows}. "
         )
         return pl.concat(frames, how="diagonal_relaxed")
@@ -517,7 +563,7 @@ class MarketBarsIndexDaily(BaseTushareDataset):
 
         frames: list[pl.DataFrame] = []
         total = len(instrument_ids)
-        logger.info(f"market_bars_index_daily api={api} start={start} end={end} instruments={total}. ")
+        logger.info(f"[market_bars_index_daily] api={api} start={start} end={end} instruments={total}. ")
         for idx, instrument_id in enumerate(instrument_ids, start=1):
             ranges_by_instrument = self.get_update_ranges_by_instrument([instrument_id], start, end)
             ranges = ranges_by_instrument.get(instrument_id, [])
@@ -537,7 +583,7 @@ class MarketBarsIndexDaily(BaseTushareDataset):
                     frames.append(frame)
             if idx % 200 == 0 or idx == total:
                 logger.info(
-                    f"market_bars_index_daily api={api} progress {idx}/{total}, "
+                    f"[market_bars_index_daily] api={api} progress {idx}/{total}, "
                     f"current={instrument_id}. "
                 )
 
@@ -793,18 +839,18 @@ class MarketBarsFutureDailyDataset(BaseTushareDataset):
                     frames.append(frame)
             if idx == 1 or idx % 200 == 0 or idx == total:
                 logger.info(
-                    f"market_bars_future_daily checked {idx}/{total}, "
+                    f"[market_bars_future_daily] checked {idx}/{total}, "
                     f"fetch_ranges={fetch_ranges}, fetched_rows={fetched_rows}. "
                 )
 
         if not frames:
             logger.info(
-                f"market_bars_future_daily summary checked={total}, "
+                f"[market_bars_future_daily] summary checked={total}, "
                 f"fetch_ranges={fetch_ranges}, fetched_rows={fetched_rows}. "
             )
             return pl.DataFrame()
         logger.info(
-            f"market_bars_future_daily summary checked={total}, "
+            f"[market_bars_future_daily] summary checked={total}, "
             f"fetch_ranges={fetch_ranges}, fetched_rows={fetched_rows}. "
         )
         return pl.concat(frames, how="diagonal_relaxed")

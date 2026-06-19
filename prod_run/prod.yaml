@@ -1,13 +1,13 @@
 run_env: prod
 root_dir: prod_data
 date_range:
-  start: 2026-06-18
-  end: today
+  start: 2021-01-01
+  end: 2021-12-31
 
 datasets:
   - source: tushare
     name: stock_list
-    enabled: false
+    enabled: true
 
   - source: tushare
     name: stock_st
